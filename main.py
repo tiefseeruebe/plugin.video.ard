@@ -28,21 +28,31 @@ _handle = int(sys.argv[1])
 
 WIN_ID = 10000
 win = xbmcgui.Window(WIN_ID)
-WIDGET_PROP_NAME = 'libardjsonparser.widgets'
+BASE_PROP_NAME = 'plugin.video.ard'
+WIDGET_PROP_NAME = BASE_PROP_NAME+'.widgets'
+CHANNEL_PROP_NAME = BASE_PROP_NAME+'.channels'
 CATEGORY = 'category'
 WIDGET_ID = 'widget_id'
+CHANNEL_KEY = 'channelKey'
 TITLE = 'title'
 LISTING = 'listing'
 TEASERS = 'teasers'
 
+
 VARS = {'name': 'home', 'client': 'ard', 'personalized': False}
-EXTS = {
-    'persistedQuery': {'version': 1, 'sha256Hash': '41ff7fbd45523453c78e2a780a83884ba5b66ce1483bdf1b3a3c3635491923a8'}}
-CATEGORIES = {'Overview': {
-    'url': 'https://api.ardmediathek.de/public-gateway?' +
-           'variables=' + urllib.quote(json.dumps(VARS)) +
-           '&extensions=' + urllib.quote(json.dumps(EXTS))
-}
+OV_EXTS = {
+    'persistedQuery': {'version': 1,
+                       'sha256Hash': '41ff7fbd45523453c78e2a780a83884ba5b66ce1483bdf1b3a3c3635491923a8'}}
+# noinspection SpellCheckingInspection
+CH_EXTS = {
+    'persistedQuery': {'version': 1,
+                       'sha256Hash': '375bf899992a4bb3b26917f9fbe005a9fb95813bedcb0fcfa66e5be00dafabfe'}}
+base_url = 'https://api.ardmediathek.de/public-gateway'
+CATEGORIES = {
+    'Overview': {
+        'url': base_url+'?variables='+urllib.quote(json.dumps(VARS))+'&extensions='+urllib.quote(json.dumps(OV_EXTS))},
+    'Channels': {
+        'url': base_url+'?extensions='+urllib.quote(json.dumps(CH_EXTS))}
 }
 
 
@@ -177,13 +187,12 @@ def url_get(url, use_proxy=False, verify_ssl=True):
     return body
 
 
-def parse_teasers(widgets, widget_id):
+def parse_teasers(widgets, key, value):
     log('parse_teasers')
-    log(widget_id)
     log(widgets)
 
     for widget in widgets:
-        if widget['id'] != widget_id:
+        if key in widget and widget[key] != value:
             continue
         parse_teaser(widget)
         break
@@ -222,7 +231,15 @@ def list_category(params):
         log(widgets_string)
         if widget_id > 0 and len(widgets_string) > 0:
             widgets = ast.literal_eval(widgets_string)
-            parse_teasers(widgets, widget_id)
+            parse_teasers(widgets, WIDGET_ID, widget_id)
+    if CHANNEL_KEY in params:
+        channel_key = params[CHANNEL_KEY]
+        channels_string = win.getProperty(CHANNEL_PROP_NAME)
+        log('channel_string :')
+        log(channels_string)
+        if len(channels_string) > 0:
+            channels = ast.literal_eval(channels_string)
+            parse_teasers(channels, CHANNEL_KEY, channel_key)
     else:
         if URL in params:
             url = params[URL]
@@ -254,16 +271,24 @@ def list_category(params):
         else:
             body_str = url_get(url)
             body = json.loads(body_str)
-            widgets = body['data']['defaultPage']['widgets']
-            win.setProperty(WIDGET_PROP_NAME, repr(widgets))
+            if 'data' in body:
+                if 'defaultPage' in body['data']:
+                    widgets = body['data']['defaultPage']['widgets']
+                    win.setProperty(WIDGET_PROP_NAME, repr(widgets))
 
-            # Set plugin content. It allows Kodi to select appropriate views
-            # for this type of content.
-            xbmcplugin.setContent(_handle, 'videos')
-            # Iterate through widgets.
-            for widget in widgets:
-                item = {TITLE: widget[TITLE], WIDGET_ID: widget['id']}
-                add_dir_item(item)
+                    # Set plugin content. It allows Kodi to select appropriate views
+                    # for this type of content.
+                    xbmcplugin.setContent(_handle, 'videos')
+                    # Iterate through widgets.
+                    for widget in widgets:
+                        item = {TITLE: widget[TITLE], WIDGET_ID: widget['id']}
+                        add_dir_item(item)
+                elif 'channels' in body['data']:
+                    channels = body['data']['channels']
+                    win.setProperty(CHANNEL_PROP_NAME, repr(channels))
+                    for channel in channels:
+                        item = {TITLE: channel[CHANNEL_KEY].upper(), CHANNEL_KEY: channel[CHANNEL_KEY]}
+                        add_dir_item(item)
     # Add a sort method for the virtual folder items (alphabetically, ignore articles)
     # xbmcplugin.addSortMethod(_handle, xbmcplugin.SORT_METHOD_LABEL_IGNORE_THE)
     # Finish creating a virtual folder.
@@ -311,6 +336,8 @@ def add_dir_item(item):
         url = get_url(action=LISTING, widget_id=item[WIDGET_ID])
     elif URL in item:
         url = get_url(action=LISTING, url=item[URL])
+    elif CHANNEL_KEY in item:
+        url = get_url(action=LISTING, channelKey=item[CHANNEL_KEY])
     else:
         url = get_url(action=LISTING)
     # Add the list item to a virtual Kodi folder.
